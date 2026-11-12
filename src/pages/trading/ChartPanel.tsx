@@ -19,6 +19,7 @@ import { Clock, ListTree } from "lucide-react";
 import {
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -65,6 +66,7 @@ import { DRAWING_STYLES_EVENT, getStyleDefaults } from "./drawingStyles.ts";
 import { NewsOverlay } from "./NewsOverlay.tsx";
 import { ObjectTreePanel } from "./ObjectTreePanel.tsx";
 import { useChallengeLevels } from "./useChallengeLevels.ts";
+import { heikinAshiBar, toHeikinAshi } from "./heikinAshi.ts";
 import { useIndicators } from "./useIndicators.ts";
 import { useNewsOverlay } from "./useNewsOverlay.ts";
 import { useSlTpDrag } from "./useSlTpDrag.ts";
@@ -270,6 +272,89 @@ export interface ChartPanelProps {
    * staleness watchdog must not treat the old last-bar as a data gap.
    */
   isReplaying?: boolean;
+  /** How the price series is drawn. Default "candles". */
+  chartStyle?: ChartStyle;
+  /**
+   * "bidask" (default): Bid/Ask lines and the Bid/Ask legend row, for quoted
+   * markets. "last": a last-price label and line, the way stock charts read.
+   */
+  priceLabel?: "bidask" | "last";
+  /** Extra markers on the price series (strategy signals), merged with replay markers. */
+  extraMarkers?: SeriesMarker<Time>[];
+  /**
+   * Refetch when the last bar looks older than two intervals. Turn it off for
+   * markets that close: a Friday daily bar is not a data gap on Sunday.
+   */
+  staleWatchdog?: boolean;
+  /** Replaces the symbol/timeframe text at the start of the legend. */
+  legendTitle?: ReactNode;
+  /** Rendered under the OHLC legend row (indicator legends). Interactive. */
+  legendBelow?: ReactNode;
+  /** The live chart objects after every (re)creation; null just before teardown. */
+  onChartApi?: (api: ChartApiHandle | null) => void;
+  /** The real bars on screen (scroll-loaded history included), oldest first. */
+  onChartData?: (bars: ChartBar[]) => void;
+  /** Rendered over the chart, e.g. pane separators. */
+  children?: ReactNode;
+  /** Theme colours for this chart; the user's Chart Settings overrides still win. */
+  palette?: Partial<ChartColors>;
+  /** Left inset of the legend in px, to clear the drawing rail. Default 12. */
+  legendInset?: number;
+  /** The sample economic-news overlay. Default true (hidden in Hyperliquid mode). */
+  showNews?: boolean;
+}
+
+export type ChartStyle = "candles" | "hollow" | "heikin" | "bars" | "line" | "area";
+
+export interface ChartApiHandle {
+  chart: IChartApi;
+  /** The price series. Drawings, markers and price lines attach here. */
+  series: ISeriesApi<"Candlestick">;
+  volume: ISeriesApi<"Histogram">;
+  container: HTMLDivElement;
+}
+
+export interface ChartBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+const TRANSPARENT = "rgba(0,0,0,0)";
+
+/**
+ * Fold a live tick or bar into the real last bar, then redraw it as Heikin
+ * Ashi. Updates for a newer bucket are left for the next history refetch.
+ */
+function applyHeikinAshiLive(
+  series: ISeriesApi<"Candlestick">,
+  realLastRef: { current: CandlestickData<Time> | null },
+  haData: CandlestickData<Time>[],
+  live: { open?: number; high?: number; low?: number; close: number; timestamp: number },
+  intervalSec: number,
+): void {
+  const real = realLastRef.current;
+  if (!real || !Number.isFinite(live.close)) return;
+  const barStart = real.time as number;
+  const sec = live.timestamp >= 1e12 ? Math.floor(live.timestamp / 1000) : live.timestamp;
+  if (sec < barStart || sec >= barStart + intervalSec) return;
+  if (live.open !== undefined && live.high !== undefined && live.low !== undefined) {
+    real.open = live.open;
+    real.high = live.high;
+    real.low = live.low;
+  } else {
+    real.high = Math.max(real.high, live.close);
+    real.low = Math.min(real.low, live.close);
+  }
+  real.close = live.close;
+  try {
+    series.update(heikinAshiBar(real, haData[haData.length - 2]));
+  } catch {
+    /* out-of-order update */
+  }
 }
 
 // ── Chart plugin overlays ─────────────────────────────────────────────────────
@@ -945,6 +1030,10 @@ function ChartLegendHeader({
   pipDigits,
   showOhlcLegend,
   showCountdown,
+  title,
+  below,
+  showBidAsk,
+  inset,
 }: {
   selectedSymbol: string;
   timeframe: Timeframe;
@@ -954,14 +1043,25 @@ function ChartLegendHeader({
   pipDigits: number;
   showOhlcLegend: boolean;
   showCountdown: boolean;
+  title?: ReactNode;
+  below?: ReactNode;
+  showBidAsk: boolean;
+  inset?: number;
 }) {
   return (
-    <div className="absolute top-2 left-3 z-10 pointer-events-none select-none">
+    <div
+      className="absolute top-2 left-3 z-10 pointer-events-none select-none"
+      style={inset != null ? { left: inset } : undefined}
+    >
       <div className="flex items-center gap-2 text-[11px] font-mono leading-none mb-1">
-        <span className="text-foreground font-bold text-[13px] tracking-tight">
-          {selectedSymbol}
-        </span>
-        <span className="text-muted-foreground font-medium">{timeframe}</span>
+        {title ?? (
+          <>
+            <span className="text-foreground font-bold text-[13px] tracking-tight">
+              {selectedSymbol}
+            </span>
+            <span className="text-muted-foreground font-medium">{timeframe}</span>
+          </>
+        )}
         {legend && showOhlcLegend && <OhlcvLegendRow legend={legend} pipDigits={pipDigits} />}
         {countdown && showCountdown && (
           <span className="text-muted-foreground/60 flex items-center gap-0.5">
@@ -971,7 +1071,8 @@ function ChartLegendHeader({
         )}
       </div>
       {/* Secondary info row: Bid / Ask / Spread */}
-      {tick && <BidAskRow tick={tick} pipDigits={pipDigits} />}
+      {tick && showBidAsk && <BidAskRow tick={tick} pipDigits={pipDigits} />}
+      {below && <div className="pointer-events-auto mt-1 w-max">{below}</div>}
     </div>
   );
 }
@@ -1113,7 +1214,29 @@ export function ChartPanel({
   onClearDrawings,
   onClearIndicators,
   isReplaying = false,
+  chartStyle = "candles",
+  priceLabel = "bidask",
+  extraMarkers,
+  staleWatchdog = true,
+  legendTitle,
+  legendBelow,
+  onChartApi,
+  onChartData,
+  children,
+  palette,
+  legendInset,
+  showNews = true,
 }: ChartPanelProps) {
+  // Mirrored into refs (in an effect declared before the chart-create effect,
+  // so it runs first) because the create effect must not re-run for them.
+  const onChartApiRef = useRef(onChartApi);
+  const onChartDataRef = useRef(onChartData);
+  const chartStyleRef = useRef(chartStyle);
+  useEffect(() => {
+    onChartApiRef.current = onChartApi;
+    onChartDataRef.current = onChartData;
+    chartStyleRef.current = chartStyle;
+  });
   const queryClient = useQueryClient();
   const lastGapRefetchAtRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1172,8 +1295,12 @@ export function ChartPanel({
   // Everything downstream (chart options, bid/ask lines, position overlays,
   // volume bars) reads from this merged object.
   const colors = useMemo(
-    () => mergeChartColors(isDark ? CHART_COLORS.dark : CHART_COLORS.light, chartPrefs),
-    [isDark, chartPrefs],
+    () =>
+      mergeChartColors(
+        { ...(isDark ? CHART_COLORS.dark : CHART_COLORS.light), ...palette },
+        chartPrefs,
+      ),
+    [isDark, chartPrefs, palette],
   );
 
   // Scroll-loaded history is tagged with the view it belongs to, so a symbol
@@ -1319,7 +1446,31 @@ export function ChartPanel({
       historicalExtra.view === `${selectedSymbol}:${timeframe}` ? historicalExtra.bars : [];
     return extra.length === 0 ? candles : [...extra, ...candles];
   }, [historicalExtra, candles, selectedSymbol, timeframe]);
-  const { chartData, volumeData } = useChartData(allCandles, colors);
+  const { chartData: realChartData, volumeData } = useChartData(allCandles, colors);
+  // What the price series draws. Heikin Ashi is a transform of the real bars;
+  // every other style draws the real bars (line/area/bars through an extra series).
+  const chartData = useMemo(
+    () => (chartStyle === "heikin" ? toHeikinAshi(realChartData) : realChartData),
+    [chartStyle, realChartData],
+  );
+  // Real (untransformed) last bar, so a Heikin Ashi chart can fold live ticks
+  // into the true OHLC before converting.
+  const realLastRef = useRef<CandlestickData<Time> | null>(null);
+  useEffect(() => {
+    const last = realChartData[realChartData.length - 1];
+    realLastRef.current = last ? { ...last } : null;
+    if (!onChartDataRef.current) return;
+    onChartDataRef.current(
+      realChartData.map((c, i) => ({
+        time: c.time as number,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: volumeData[i]?.value ?? 0,
+      })),
+    );
+  }, [realChartData, volumeData]);
 
   const {
     newsConfig,
@@ -1328,7 +1479,7 @@ export function ChartPanel({
     setShowNewsConfigDialog,
     newsPopup,
     setNewsPopup,
-  } = useNewsOverlay(containerRef, chartRef, selectedSymbol, isDark, chartData);
+  } = useNewsOverlay(containerRef, chartRef, selectedSymbol, isDark, chartData, showNews);
 
   const dragPrice = useSlTpDrag(
     containerRef,
@@ -1424,14 +1575,14 @@ export function ChartPanel({
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
-    if (!replayTradeEvents || replayTradeEvents.length === 0) {
-      series.setMarkers([]);
-      return;
-    }
-    const markers: SeriesMarker<Time>[] = [];
-    for (const ev of replayTradeEvents) {
+    const markers: SeriesMarker<Time>[] = extraMarkers ? [...extraMarkers] : [];
+    for (const ev of replayTradeEvents ?? []) {
       const marker = buildReplayMarker(ev, timeframe);
       if (marker) markers.push(marker);
+    }
+    if (markers.length === 0) {
+      series.setMarkers([]);
+      return;
     }
     // lightweight-charts requires markers sorted by time ascending
     markers.sort((a, b) => (a.time as number) - (b.time as number));
@@ -1439,7 +1590,7 @@ export function ChartPanel({
     return () => {
       series.setMarkers([]);
     };
-  }, [replayTradeEvents, timeframe]);
+  }, [replayTradeEvents, timeframe, extraMarkers, chartEpoch]);
 
   // ── Candle close countdown timer ───────────────────────────
   // Daily and weekly bars get no countdown; that is decided when rendering the
@@ -1662,8 +1813,12 @@ export function ChartPanel({
 
     // Signal listener-binding hooks that a live chart instance now exists.
     setChartEpoch((e) => e + 1);
+    const container = containerRef.current;
+    onChartApiRef.current?.({ chart, series: candleSeries, volume: volumeSeries, container });
 
     return () => {
+      // Consumers detach their series/primitives while the chart still exists.
+      onChartApiRef.current?.(null);
       historyLoadCancelled = true;
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleRangeChange);
       ro.disconnect();
@@ -1727,15 +1882,22 @@ export function ChartPanel({
     // `colors` already carries the user's overrides (mergeChartColors).
     const up = colors.up;
     const down = colors.down;
+    // Line, area and bar styles draw through a separate series; the candle
+    // series stays (drawings, markers and price lines anchor to it) but clear.
+    const hidden = chartStyle === "line" || chartStyle === "area" || chartStyle === "bars";
+    const hollow = chartStyle === "hollow";
+    const showLast = priceLabel === "last" && !hidden;
     candleSeriesRef.current?.applyOptions({
-      upColor: up,
-      downColor: down,
-      borderUpColor: up,
-      borderDownColor: down,
-      wickUpColor: up,
-      wickDownColor: down,
-      wickVisible: chartPrefs.showWicks,
-      borderVisible: chartPrefs.showCandleBorders,
+      upColor: hidden || hollow ? TRANSPARENT : up,
+      downColor: hidden ? TRANSPARENT : down,
+      borderUpColor: hidden ? TRANSPARENT : up,
+      borderDownColor: hidden ? TRANSPARENT : down,
+      wickUpColor: hidden ? TRANSPARENT : up,
+      wickDownColor: hidden ? TRANSPARENT : down,
+      wickVisible: hidden ? false : chartPrefs.showWicks,
+      borderVisible: hidden ? false : hollow || chartPrefs.showCandleBorders,
+      lastValueVisible: showLast,
+      priceLineVisible: showLast,
     });
   }, [
     chartPrefs.candleUpColor,
@@ -1745,7 +1907,69 @@ export function ChartPanel({
     colors.up,
     colors.down,
     chartEpoch,
+    chartStyle,
+    priceLabel,
   ]);
+
+  // ── Line / area / bar styles: one display series mirroring the real bars ──
+  const displaySeriesRef = useRef<
+    ISeriesApi<"Line"> | ISeriesApi<"Area"> | ISeriesApi<"Bar"> | null
+  >(null);
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || (chartStyle !== "line" && chartStyle !== "area" && chartStyle !== "bars")) return;
+    const common = {
+      priceFormat: { type: "price" as const, precision: pipDigits, minMove: getMinMove(pipDigits) },
+      lastValueVisible: priceLabel === "last",
+      priceLineVisible: priceLabel === "last",
+    };
+    const series =
+      chartStyle === "bars"
+        ? chart.addBarSeries({ ...common, upColor: colors.up, downColor: colors.down, thinBars: false })
+        : chartStyle === "area"
+          ? chart.addAreaSeries({
+              ...common,
+              lineColor: "#4a8ad6",
+              topColor: "rgba(74,138,214,0.28)",
+              bottomColor: "rgba(74,138,214,0.02)",
+              lineWidth: 2,
+            })
+          : chart.addLineSeries({ ...common, color: "#4a8ad6", lineWidth: 2 });
+    displaySeriesRef.current = series;
+    return () => {
+      displaySeriesRef.current = null;
+      try {
+        chart.removeSeries(series);
+      } catch {
+        /* chart already torn down */
+      }
+    };
+  }, [chartStyle, chartEpoch, pipDigits, priceLabel, colors.up, colors.down]);
+
+  useEffect(() => {
+    const series = displaySeriesRef.current;
+    if (!series) return;
+    if (chartStyle === "bars") {
+      (series as ISeriesApi<"Bar">).setData(realChartData);
+    } else {
+      (series as ISeriesApi<"Line">).setData(
+        realChartData.map((c) => ({ time: c.time, value: c.close })),
+      );
+    }
+  }, [realChartData, chartStyle, chartEpoch]);
+
+  /** Mirror the price series' current bar onto the display series after a live update. */
+  const mirrorLiveBar = useCallback(() => {
+    const series = displaySeriesRef.current;
+    const bar = lastCandleRef.current;
+    if (!series || !bar) return;
+    try {
+      if (chartStyleRef.current === "bars") (series as ISeriesApi<"Bar">).update(bar);
+      else (series as ISeriesApi<"Line">).update({ time: bar.time, value: bar.close });
+    } catch {
+      /* update older than the series' last bar: ignore */
+    }
+  }, []);
 
   useEffect(() => {
     volumeSeriesRef.current?.applyOptions({ visible: chartPrefs.showVolume });
@@ -1864,8 +2088,13 @@ export function ChartPanel({
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series || !liveCandle || !lastCandleRef.current) return;
+    if (chartStyle === "heikin") {
+      applyHeikinAshiLive(series, realLastRef, chartData, liveCandle, intervalSecOf(timeframe));
+      return;
+    }
     applyServerCandle(liveCandle, makeRtCtx(series));
-  }, [liveCandle, makeRtCtx]);
+    mirrorLiveBar();
+  }, [liveCandle, makeRtCtx, chartStyle, chartData, mirrorLiveBar, timeframe]);
 
   // Secondary: tick-based smoothing between server CandleUpdate pulses.
   // Server CandleUpdate is authoritative — when it arrives next it will
@@ -1873,8 +2102,20 @@ export function ChartPanel({
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series || !tick) return;
+    if (chartStyle === "heikin") {
+      const price = (tick.bid + tick.ask) / 2;
+      applyHeikinAshiLive(
+        series,
+        realLastRef,
+        chartData,
+        { close: price, timestamp: tick.timestamp },
+        intervalSecOf(timeframe),
+      );
+      return;
+    }
     applyTick(tick, makeRtCtx(series));
-  }, [tick, makeRtCtx]);
+    mirrorLiveBar();
+  }, [tick, makeRtCtx, chartStyle, chartData, mirrorLiveBar, timeframe]);
 
   // ── Line-cross price alerts (client-side, in-session) ──────────
   // Fire a toast + beep when the live mid price crosses an alert-enabled
@@ -1907,7 +2148,7 @@ export function ChartPanel({
   useEffect(() => {
     // Replay shows a historical slice — its last bar is hours or days old by
     // design, so the staleness check would fire a refetch loop. Skip it.
-    if (isReplaying) return;
+    if (isReplaying || !staleWatchdog) return;
     const intervalSec = (TF_INTERVAL_MS[timeframe] ?? 60_000) / 1000;
     const id = setInterval(() => {
       if (!lastCandleRef.current) return;
@@ -1916,7 +2157,7 @@ export function ChartPanel({
       requestGapRefetch(lastGapRefetchAtRef, queryClient, selectedSymbol, timeframe);
     }, 30_000);
     return () => clearInterval(id);
-  }, [selectedSymbol, timeframe, queryClient, isReplaying]);
+  }, [selectedSymbol, timeframe, queryClient, isReplaying, staleWatchdog]);
 
   // ── Chart plugin overlays ──────────────────────────────────
   // Re-runs when active plugins change or the chart is recreated (isDark /
@@ -1942,11 +2183,12 @@ export function ChartPanel({
     const series = candleSeriesRef.current;
     if (!series) return;
     applyBidAskLines(
-      tick,
+      // A last-price chart shows the series' own label instead.
+      priceLabel === "last" ? undefined : tick,
       { showBidLine: chartPrefs.showBidLine, showAskLine: chartPrefs.showAskLine },
       makeRtCtx(series),
     );
-  }, [tick, chartPrefs.showBidLine, chartPrefs.showAskLine, makeRtCtx]);
+  }, [tick, chartPrefs.showBidLine, chartPrefs.showAskLine, makeRtCtx, priceLabel]);
 
   // ── Position/order overlays ────────────────────────────────
   useEffect(() => {
@@ -1991,7 +2233,13 @@ export function ChartPanel({
         pipDigits={pipDigits}
         showOhlcLegend={chartPrefs.showOhlcLegend}
         showCountdown={chartPrefs.showCountdown}
+        title={legendTitle}
+        below={legendBelow}
+        showBidAsk={priceLabel !== "last"}
+        inset={legendInset}
       />
+
+      {children}
 
       {/* Drag-to-edit tooltip */}
       {dragPrice && (
@@ -2064,7 +2312,7 @@ export function ChartPanel({
 
       {/* News overlay (popup, config dialog, button) */}
       {/* No economic-calendar data source exists for Hyperliquid markets. */}
-      {!isHyperliquidMode() && (
+      {showNews && !isHyperliquidMode() && (
         <NewsOverlay
           newsConfig={newsConfig}
           setNewsConfig={setNewsConfig}

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import fs from "fs";
 import path from "path";
 import { buildCsp, buildHeadersFile, extraConnectFromEnv } from "./src/hyperliquid/compliance/csp.ts";
+import { alpacaProxy } from "./src/stocks/server/alpacaProxy.ts";
 
 /**
  * Production-only security headers. The strict CSP is injected as a <meta> tag
@@ -43,7 +44,7 @@ export default defineConfig({
   // GitHub Pages serves a project site from /<repo>/, so the demo workflow sets
   // BASE_PATH. Local builds and self-hosting stay at the domain root.
   base: process.env.BASE_PATH ?? "/",
-  plugins: [react(), securityHeaders()],
+  plugins: [react(), securityHeaders(), alpacaProxy()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

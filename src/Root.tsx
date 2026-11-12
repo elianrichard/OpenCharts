@@ -16,6 +16,9 @@ import { Terminal } from "./terminal/Terminal.tsx";
  *  - `VITE_ADAPTER=hyperliquid`, or no `VITE_ADAPTER` with `VITE_HL_BUILDER_ADDRESS`
  *    set: the Hyperliquid broker (live markets, real wallet, real orders).
  *  - `VITE_ADAPTER=binance`: the live-market-data example from examples/binance-adapter.
+ *  - `VITE_ADAPTER=alpaca` (or `stocks`): the US-stock workspace on Alpaca data,
+ *    with the trading-script scans, holdings and strategy tester (src/stocks).
+ *    Local only: the dev server proxies Alpaca so the keys never reach the page.
  *  - `VITE_ADAPTER=demo`, or nothing configured: the bundled demo data.
  *
  * The Hyperliquid and Binance code is loaded lazily, so neither reaches the
@@ -25,6 +28,7 @@ import { Terminal } from "./terminal/Terminal.tsx";
 const choice = chooseAdapter(import.meta.env);
 
 const HyperliquidApp = lazy(() => import("./hyperliquid/ui/HyperliquidApp.tsx"));
+const StocksApp = lazy(() => import("./stocks/ui/StocksApp.tsx"));
 
 function Loading() {
   return (
@@ -60,6 +64,13 @@ function BinanceOrDemo() {
 }
 
 export function Root() {
+  if (choice === "alpaca") {
+    return (
+      <Suspense fallback={<Loading />}>
+        <StocksApp />
+      </Suspense>
+    );
+  }
   if (choice === "hyperliquid") {
     return (
       <Suspense fallback={<Loading />}>

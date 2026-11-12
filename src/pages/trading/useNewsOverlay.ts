@@ -39,6 +39,8 @@ export function useNewsOverlay(
   selectedSymbol: string,
   isDark: boolean,
   chartData: CandlestickData<Time>[],
+  /** False removes the overlay entirely (markets the sample calendar does not cover). */
+  active = true,
 ): UseNewsOverlayReturn {
   const [newsConfig, setNewsConfig] = useState<NewsOverlayConfig>(() => {
     const saved = safeStorage.getItem("newsOverlayConfig");
@@ -82,7 +84,7 @@ export function useNewsOverlay(
 
   // Filter events based on config
   const calendarEvents = useMemo(() => {
-    if (!newsConfig.enabled) return [];
+    if (!newsConfig.enabled || !active) return [];
     const now = nowMs;
     return (rawCalendarData || []).filter((e: EconomicCalendarEvent) => {
       if (e.impact === "high" && !newsConfig.showHigh) return false;
@@ -93,7 +95,7 @@ export function useNewsOverlay(
       if (eventTime > now && !newsConfig.showFuture) return false;
       return true;
     });
-  }, [rawCalendarData, newsConfig, nowMs]);
+  }, [rawCalendarData, newsConfig, nowMs, active]);
 
   // Render news markers on chart (vertical lines + flag icons)
   useEffect(() => {

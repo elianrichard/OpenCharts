@@ -1,0 +1,181 @@
+/*
+ * Stock workspace theme — "data terminal".
+ *
+ * Scoped to .stocks-ws so the crypto demo and Hyperliquid modes keep their own
+ * look. The Tailwind HSL variables are re-pointed, so every shared panel (the
+ * chart legend, drawing rail, dialogs) picks the palette up without edits.
+ *
+ * Colour budget: under 3% of the screen. The accent is only ever a 1px line
+ * (a selection) or the main data element; positive/negative are reserved for
+ * the "what moved" columns. Figures are JetBrains Mono, text Public Sans.
+ */
+@import "@fontsource-variable/public-sans";
+@import "@fontsource-variable/jetbrains-mono";
+
+.stocks-ws {
+  --ground: #171719;
+  --surface: #131217;
+  --raised: #212023;
+  --edge: #222224;
+  --rule: #1b1a1f;
+  --control: #3a3a3e;
+  --ink: #ffffff;
+  --ink-2: #bdbdc0;
+  --mute: #8a8c92;
+  --line-accent: #4a8ad6;
+  --pos: #44a282;
+  --neg: #e5566f;
+  --warn: #d9a441;
+  --pill-pos-bg: #1b2828;
+  --pill-pos-ink: #5fc39c;
+  --pill-neg-bg: #2c1a20;
+  --pill-neg-ink: #e5566f;
+  --pill-warn-bg: #2a2416;
+  --pill-warn-ink: #d9a441;
+  --pill-neutral-bg: #212023;
+  --pill-neutral-ink: #bdbdc0;
+
+  /* Shared Tailwind tokens (HSL triplets) */
+  --background: 252 12% 8%;
+  --foreground: 0 0% 100%;
+  --card: 240 4% 9%;
+  --card-foreground: 0 0% 100%;
+  --primary: 213 63% 56%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 260 4% 13%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 260 4% 13%;
+  --muted-foreground: 225 4% 56%;
+  --accent: 213 63% 56%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 350 73% 62%;
+  --border: 240 3% 14%;
+  --input: 260 4% 13%;
+  --ring: 213 63% 56%;
+  --success: 160 41% 45%;
+  --warning: 39 67% 55%;
+  --buy: 160 41% 45%;
+  --sell: 350 73% 62%;
+  --panel-header: 240 4% 9%;
+  --radius: 6px;
+
+  font-family: "Public Sans Variable", "Public Sans", Inter, system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--ground);
+}
+
+.stocks-ws .num,
+.stocks-ws .font-mono {
+  font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
+}
+
+/* The one selection mark: a 1px accent line exactly as wide as its label. */
+.stocks-ws .sel {
+  position: relative;
+}
+.stocks-ws .sel[data-on="true"]::after {
+  content: "";
+  position: absolute;
+  left: var(--sel-inset, 0);
+  right: var(--sel-inset, 0);
+  bottom: 0;
+  height: 1px;
+  background: var(--line-accent);
+}
+.stocks-ws .sel-left[data-on="true"] {
+  box-shadow: inset 1px 0 0 var(--line-accent);
+}
+
+.stocks-ws .pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.stocks-ws .pill-pos { background: var(--pill-pos-bg); color: var(--pill-pos-ink); }
+.stocks-ws .pill-neg { background: var(--pill-neg-bg); color: var(--pill-neg-ink); }
+.stocks-ws .pill-warn { background: var(--pill-warn-bg); color: var(--pill-warn-ink); }
+.stocks-ws .pill-neutral { background: var(--pill-neutral-bg); color: var(--pill-neutral-ink); }
+
+.stocks-ws .tbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 4px;
+  color: var(--ink-2);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+.stocks-ws .tbtn:hover { background: var(--raised); color: var(--ink); }
+.stocks-ws .tbtn:focus-visible,
+.stocks-ws button:focus-visible,
+.stocks-ws [role="row"]:focus-visible,
+.stocks-ws input:focus-visible {
+  outline: 1px solid var(--line-accent);
+  outline-offset: -1px;
+}
+.stocks-ws .tbtn[aria-pressed="true"] { color: var(--ink); }
+.stocks-ws .tbtn:disabled { opacity: 0.4; pointer-events: none; }
+
+.stocks-ws .vsep {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 4px;
+  background: var(--edge);
+}
+
+.stocks-ws .scroll-thin { scrollbar-width: thin; scrollbar-color: var(--control) transparent; }
+
+.stocks-ws .field {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  background: var(--raised);
+  border: 1px solid transparent;
+  color: var(--ink);
+  font-size: 13px;
+}
+.stocks-ws .field::placeholder { color: var(--mute); }
+.stocks-ws .field:focus { border-color: var(--line-accent); outline: none; }
+
+.stocks-ws .menu {
+  background: var(--raised);
+  border: 1px solid var(--control);
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+}
+.stocks-ws .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+  text-align: left;
+}
+.stocks-ws .menu-item:hover,
+.stocks-ws .menu-item[data-active="true"] { background: #2a292d; color: var(--ink); }
+
+.stocks-ws .row-hover:hover { background: #1d1c21; }
+.stocks-ws .row-selected { background: #1f2430; }
+
+/* Sentence-case headers: the terminal's global table style tracks capitals. */
+.stocks-ws th {
+  text-transform: none;
+  letter-spacing: normal;
+}

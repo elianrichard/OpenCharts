@@ -212,9 +212,10 @@ export const api = {
   ): Promise<MarketDataCandlesPayload> =>
     api.getCandles(symbol, timeframe, limit, range).then(candlesPayload),
 
+  /** The adapter's current quote, or null when it has none (never a made-up 0/0). */
   getTick: async (symbol: string) => {
     const quote = await getAdapter().marketData.getQuote?.(symbol);
-    return quote ?? { symbol, bid: 0, ask: 0, timestamp: Date.now() };
+    return quote ?? null;
   },
 
   getMarketDataHealth: () => Promise.resolve({ status: "ok" as const }),
